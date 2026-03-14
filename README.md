@@ -1,21 +1,43 @@
 # MuniAnalyse
 
-MuniAnalyse est l'outil spécialisé d'analyse documentaire de la suite municipale.
+MuniAnalyse est l'outil specialise correspondant dans la suite documentaire municipale Orchiviste/Muni.
 
 ## Mission
 
-Produire des signaux d'analyse exploitables (contenu, qualité, structure, confiance) pour orienter les étapes suivantes du pipeline.
+Ce depot fournit le socle executable minimal (Core + CLI) pour l'integration V1 via CLI JSON local.
 
 ## Positionnement
 
-- Rôle: outil spécialisé d'analyse.
-- Orchiviste reste le cockpit/hub; MuniAnalyse reste un outil autonome dédié.
+- Outil autonome executables seul.
+- Integrable dans Orchiviste (cockpit/hub) via contrat commun CLI JSON.
 
-## Versionnage
+## Contrat CLI JSON V1
 
-- Version initiale de normalisation: `0.1.0`.
-- Le projet suit [Semantic Versioning](https://semver.org/lang/fr/).
+Commande:
+
+```bash
+muni-analyse-cli run --request /path/request.json --result /path/result.json
+```
+
+Valeurs autorisees de `status`:
+
+- `queued`
+- `running`
+- `succeeded`
+- `failed`
+- `needs_review`
+- `cancelled`
+- `not_implemented`
+
+Le squelette actuel retourne `not_implemented` tant que la logique metier n'est pas implementee.
+
+## Build et tests
+
+```bash
+swift build
+swift test
+```
 
 ## Licence
 
-Ce dépôt est publié sous licence **GNU GPL v3.0**. Voir [LICENSE](LICENSE).
+GNU GPL v3.0, voir [LICENSE](LICENSE).
