@@ -7,14 +7,21 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: macos-latest
+    runs-on: macos-14
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Swift version
-        run: swift --version
+      - name: Verify Swift 6 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift --version
+          if ! swift --version | grep -E "Swift version 6\\." >/dev/null; then
+            echo "Swift 6.x is required for CI." >&2
+            exit 1
+          fi
 
       - name: Build
         run: swift build
