@@ -6,6 +6,8 @@ Le format s'inspire de Keep a Changelog et le projet suit Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-16
+
 ### Changed
 - Remplacement des contrats locaux dupliques par `OrchivisteKitContracts`.
 - Intégration de `OrchivisteKitInterop` pour la lecture/ecriture canonique `ToolRequest/ToolResult`.

@@ -11,6 +11,11 @@ Fournir une analyse texte deterministe exploitable via contrat CLI JSON V1, sans
 - Outil autonome executable localement.
 - Integrable dans Orchiviste (cockpit/hub) via contrat commun OrchivisteKit.
 
+## Version
+
+- Version de release: `0.2.0`
+- Tag Git: `v0.2.0`
+
 ## Contrat CLI JSON V1
 
 Commande canonique:
