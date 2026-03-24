@@ -154,6 +154,62 @@ Séance du conseil
         #expect(agendaEntry?.documentSubject == "Séance du conseil")
         #expect(agendaEntry?.documentDate == "2025-03-17")
     }
+
+    @Test
+    func canonicalRunFallsBackToFilenameWhenPdfTextIsUnsupported() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("muni-analyse-tests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        let resolutionPath = tempDirectory
+            .appendingPathComponent("Résolution NO 2025-54 – Extension du délai de construction – 2025-02-03.pdf")
+            .path
+        let agendaPath = tempDirectory
+            .appendingPathComponent("Ordre du jour – Séance du conseil – 2025-03-17.pdf")
+            .path
+        let outputPath = tempDirectory.appendingPathComponent("document_metadata.json").path
+
+        try "Contenu PDF non exploitable".write(
+            to: URL(fileURLWithPath: resolutionPath),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "Autre contenu non exploitable".write(
+            to: URL(fileURLWithPath: agendaPath),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let request = ToolRequest(
+            requestID: "req-extract-filename-fallback",
+            tool: "MuniAnalyse",
+            action: "run",
+            parameters: [
+                "extract_document_metadata": .bool(true),
+                "source_paths": .array([.string(resolutionPath), .string(agendaPath)]),
+                "document_metadata_output_path": .string(outputPath)
+            ]
+        )
+
+        let result = CanonicalRunAdapter.execute(request: request)
+
+        #expect(result.status == .succeeded)
+        #expect(result.errors.isEmpty)
+        #expect(result.metadata["documents_extracted"] == .number(2))
+
+        let data = try Data(contentsOf: URL(fileURLWithPath: outputPath))
+        let payload = try JSONDecoder().decode(DocumentMetadataTestPayload.self, from: data)
+
+        let resolutionEntry = payload.documents.first { $0.sourceFile.contains("Résolution NO 2025-54") }
+        #expect(resolutionEntry?.documentType == "Résolution NO 2025-54")
+        #expect(resolutionEntry?.documentDate == "2025-02-03")
+
+        let agendaEntry = payload.documents.first { $0.sourceFile.contains("Ordre du jour") }
+        #expect(agendaEntry?.documentType == "Ordre du jour")
+        #expect(agendaEntry?.documentSubject == "Séance du conseil")
+        #expect(agendaEntry?.documentDate == "2025-03-17")
+    }
 }
 
 private struct DocumentMetadataTestPayload: Decodable {
