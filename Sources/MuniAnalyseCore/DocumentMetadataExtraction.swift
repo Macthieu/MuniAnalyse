@@ -48,7 +48,7 @@ public enum MuniAnalyseDocumentMetadataExtractor {
             return agendaEntry
         }
 
-        return nil
+        return extractEntryFromSourceFileName(sourceFile: normalizedSourceFile)
     }
 
     private static func extractResolutionEntry(from text: String, sourceFile: String) -> DocumentMetadataEntry? {
@@ -242,6 +242,58 @@ public enum MuniAnalyseDocumentMetadataExtractor {
             }
         }
         return nil
+    }
+
+    private static func extractEntryFromSourceFileName(sourceFile: String) -> DocumentMetadataEntry? {
+        let fileName = URL(fileURLWithPath: sourceFile).deletingPathExtension().lastPathComponent
+        let components = splitFilenameComponents(fileName)
+        guard components.count >= 2 else {
+            return nil
+        }
+
+        let firstComponent = components[0]
+        let foldedFirst = folded(firstComponent)
+        let dateComponent = components.last ?? ""
+        guard let date = extractNormalizedDate(from: dateComponent) else {
+            return nil
+        }
+
+        let subjectComponents = components.dropFirst().dropLast()
+        let subjectRaw = subjectComponents.joined(separator: " – ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = subjectRaw.isEmpty ? nil : subjectRaw
+
+        if foldedFirst.contains("resolution"), let number = extractResolutionNumber(from: firstComponent) {
+            return DocumentMetadataEntry(
+                sourceFile: sourceFile,
+                documentType: "Résolution NO \(number)",
+                documentSubject: cleanedResolutionSubject(subject ?? "Sans objet"),
+                documentDate: date
+            )
+        }
+
+        if foldedFirst.contains("ordre du jour") {
+            return DocumentMetadataEntry(
+                sourceFile: sourceFile,
+                documentType: "Ordre du jour",
+                documentSubject: subject ?? "Séance du conseil",
+                documentDate: date
+            )
+        }
+
+        return nil
+    }
+
+    private static func splitFilenameComponents(_ fileName: String) -> [String] {
+        let separators = [" – ", " — ", " - "]
+
+        for separator in separators where fileName.contains(separator) {
+            return fileName
+                .components(separatedBy: separator)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+
+        return []
     }
 
     private static func cleanedResolutionSubject(_ subject: String) -> String {
