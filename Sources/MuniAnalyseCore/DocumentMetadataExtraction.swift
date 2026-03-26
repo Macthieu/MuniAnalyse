@@ -111,11 +111,15 @@ public enum MuniAnalyseDocumentMetadataExtractor {
     private static func extractResolutionSubject(from text: String) -> String? {
         let lines = normalizedLines(from: text)
 
+        if let subjectUnderHeading = extractResolutionTitleUnderHeading(from: lines) {
+            return subjectUnderHeading
+        }
+
         for line in lines {
             let foldedLine = folded(line)
             if foldedLine.hasPrefix("objet") || foldedLine.hasPrefix("titre") {
                 if let subject = splitValueLine(line), !subject.isEmpty {
-                    let cleaned = cleanedResolutionSubject(subject)
+                    let cleaned = normalizeResolutionSubjectForNaming(subject)
                     if !cleaned.isEmpty {
                         return cleaned
                     }
@@ -130,7 +134,7 @@ public enum MuniAnalyseDocumentMetadataExtractor {
                 continue
             }
             if let subject = splitAfterDash(in: line), !subject.isEmpty, !isNoiseLine(subject) {
-                let cleaned = cleanedResolutionSubject(subject)
+                let cleaned = normalizeResolutionSubjectForNaming(subject)
                 if !cleaned.isEmpty {
                     return cleaned
                 }
@@ -139,7 +143,7 @@ public enum MuniAnalyseDocumentMetadataExtractor {
         }
 
         for line in lines where !isNoiseLine(line) {
-            let cleaned = cleanedResolutionSubject(line)
+            let cleaned = normalizeResolutionSubjectForNaming(line)
             if !cleaned.isEmpty {
                 return cleaned
             }
@@ -244,6 +248,36 @@ public enum MuniAnalyseDocumentMetadataExtractor {
         return nil
     }
 
+    private static func extractResolutionTitleUnderHeading(from lines: [String]) -> String? {
+        for (index, line) in lines.enumerated() {
+            guard isResolutionHeadingLine(line) else {
+                continue
+            }
+
+            let upperBound = min(lines.count, index + 6)
+            if upperBound <= index + 1 {
+                continue
+            }
+
+            for candidate in lines[(index + 1)..<upperBound] {
+                if isSeparatorLine(candidate) || isNoiseLine(candidate) {
+                    continue
+                }
+
+                guard isLikelyUppercaseTitleLine(candidate) else {
+                    continue
+                }
+
+                let normalized = normalizeResolutionSubjectForNaming(candidate)
+                if !normalized.isEmpty {
+                    return normalized
+                }
+            }
+        }
+
+        return nil
+    }
+
     private static func extractEntryFromSourceFileName(sourceFile: String) -> DocumentMetadataEntry? {
         let fileName = URL(fileURLWithPath: sourceFile).deletingPathExtension().lastPathComponent
         let components = splitFilenameComponents(fileName)
@@ -266,7 +300,7 @@ public enum MuniAnalyseDocumentMetadataExtractor {
             return DocumentMetadataEntry(
                 sourceFile: sourceFile,
                 documentType: "Résolution NO \(number)",
-                documentSubject: cleanedResolutionSubject(subject ?? "Sans objet"),
+                documentSubject: normalizeResolutionSubjectForNaming(subject ?? "Sans objet"),
                 documentDate: date
             )
         }
@@ -296,7 +330,7 @@ public enum MuniAnalyseDocumentMetadataExtractor {
         return []
     }
 
-    private static func cleanedResolutionSubject(_ subject: String) -> String {
+    private static func normalizeResolutionSubjectForNaming(_ subject: String) -> String {
         var value = subject
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -310,7 +344,36 @@ public enum MuniAnalyseDocumentMetadataExtractor {
             value = value.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
         }
 
-        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+        value = value
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "'", with: "’")
+
+        guard !value.isEmpty else {
+            return value
+        }
+
+        if isLikelyUppercaseTitleLine(subject) {
+            let original = value
+            var normalized = value.lowercased(with: Locale(identifier: "fr_CA"))
+            normalized = capitalizedFirstLetter(normalized)
+            normalized = preserveAcronyms(from: original, in: normalized)
+            normalized = normalized.replacingOccurrences(
+                of: #"(?i)\binc\.?\b"#,
+                with: "inc.",
+                options: .regularExpression
+            )
+            normalized = normalized.replacingOccurrences(
+                of: #"(?i)\binc\.+(?=\s|$)"#,
+                with: "inc.",
+                options: .regularExpression
+            )
+            normalized = capitalizeFirstWord(after: "pour", in: normalized)
+            return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return value
     }
 
     private static func normalizedLines(from text: String) -> [String] {
@@ -342,6 +405,81 @@ public enum MuniAnalyseDocumentMetadataExtractor {
         }
 
         return false
+    }
+
+    private static func isResolutionHeadingLine(_ line: String) -> Bool {
+        let normalized = folded(line)
+        return normalized.contains("resolution") && extractResolutionNumber(from: line) != nil
+    }
+
+    private static func isSeparatorLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return true
+        }
+
+        let allowed = CharacterSet(charactersIn: "_-=–—.")
+        return trimmed.unicodeScalars.allSatisfy { scalar in
+            allowed.contains(scalar)
+        }
+    }
+
+    private static func isLikelyUppercaseTitleLine(_ line: String) -> Bool {
+        let letters = line.unicodeScalars.filter { CharacterSet.letters.contains($0) }
+        guard letters.count >= 8 else {
+            return false
+        }
+
+        let uppercaseCount = letters.filter { CharacterSet.uppercaseLetters.contains($0) }.count
+        return Double(uppercaseCount) / Double(letters.count) >= 0.75
+    }
+
+    private static func capitalizedFirstLetter(_ value: String) -> String {
+        guard let first = value.first else {
+            return value
+        }
+        let start = String(first).uppercased(with: Locale(identifier: "fr_CA"))
+        return start + value.dropFirst()
+    }
+
+    private static func preserveAcronyms(from original: String, in normalized: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"\b(?:[A-Z]\.){2,}"#) else {
+            return normalized
+        }
+
+        let range = NSRange(original.startIndex..<original.endIndex, in: original)
+        let matches = regex.matches(in: original, options: [], range: range)
+        var result = normalized
+
+        for match in matches {
+            guard let tokenRange = Range(match.range, in: original) else {
+                continue
+            }
+            let token = String(original[tokenRange])
+            result = result.replacingOccurrences(of: token.lowercased(), with: token, options: [.caseInsensitive])
+        }
+
+        return result
+    }
+
+    private static func capitalizeFirstWord(after keyword: String, in value: String) -> String {
+        let escapedKeyword = NSRegularExpression.escapedPattern(for: keyword)
+        let pattern = #"(?i)\b\#(escapedKeyword)\s+([\p{L}][\p{L}’'\-]*)"#
+
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return value
+        }
+
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        guard let match = regex.firstMatch(in: value, options: [], range: range),
+              let wordRange = Range(match.range(at: 1), in: value) else {
+            return value
+        }
+
+        var mutable = value
+        let word = String(mutable[wordRange])
+        mutable.replaceSubrange(wordRange, with: capitalizedFirstLetter(word))
+        return mutable
     }
 
     private static func normalizedSourceFileName(from sourceFile: String) -> String {

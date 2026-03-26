@@ -156,6 +156,54 @@ Séance du conseil
     }
 
     @Test
+    func canonicalRunExtractsResolutionSubjectFromUppercaseTitleLine() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("muni-analyse-tests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+        let resolutionPath = tempDirectory.appendingPathComponent("source-resolution-title.pdf").path
+        let outputPath = tempDirectory.appendingPathComponent("document_metadata.json").path
+
+        let resolutionText = """
+RÉSOLUTION N° 2025-54
+__________________
+EXTENSION DU DÉLAI DE CONSTRUCTION POUR PLANTATION D'ARBRES M.M. INC.
+Adoptée le 3 février 2025
+"""
+
+        try resolutionText.write(
+            to: URL(fileURLWithPath: resolutionPath),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let request = ToolRequest(
+            requestID: "req-extract-uppercase-title",
+            tool: "MuniAnalyse",
+            action: "run",
+            parameters: [
+                "extract_document_metadata": .bool(true),
+                "source_paths": .array([.string(resolutionPath)]),
+                "document_metadata_output_path": .string(outputPath)
+            ]
+        )
+
+        let result = CanonicalRunAdapter.execute(request: request)
+
+        #expect(result.status == .succeeded)
+        #expect(result.errors.isEmpty)
+
+        let data = try Data(contentsOf: URL(fileURLWithPath: outputPath))
+        let payload = try JSONDecoder().decode(DocumentMetadataTestPayload.self, from: data)
+
+        #expect(payload.documents.count == 1)
+        #expect(payload.documents.first?.documentType == "Résolution NO 2025-54")
+        #expect(payload.documents.first?.documentSubject == "Extension du délai de construction pour Plantation d’arbres M.M. inc.")
+        #expect(payload.documents.first?.documentDate == "2025-02-03")
+    }
+
+    @Test
     func canonicalRunFallsBackToFilenameWhenPdfTextIsUnsupported() throws {
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("muni-analyse-tests", isDirectory: true)
