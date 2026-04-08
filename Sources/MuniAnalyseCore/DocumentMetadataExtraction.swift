@@ -1,16 +1,71 @@
 import Foundation
 
+public enum DocumentMetadataExtractionProvenance: String, Codable, Equatable, Sendable {
+    case pdfText = "pdf_text"
+    case filenameFallback = "filename_fallback"
+}
+
+public struct DocumentMetadataWarning: Codable, Equatable, Sendable {
+    public let code: String
+    public let message: String
+    public let sourceFile: String?
+
+    public init(code: String, message: String, sourceFile: String? = nil) {
+        self.code = code
+        self.message = message
+        self.sourceFile = sourceFile
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case code
+        case message
+        case sourceFile = "source_file"
+    }
+}
+
 public struct DocumentMetadataEntry: Codable, Equatable, Sendable {
     public let sourceFile: String
     public let documentType: String
     public let documentSubject: String
     public let documentDate: String
+    public let extractionProvenance: String
+    public let warnings: [DocumentMetadataWarning]
 
-    public init(sourceFile: String, documentType: String, documentSubject: String, documentDate: String) {
+    public init(
+        sourceFile: String,
+        documentType: String,
+        documentSubject: String,
+        documentDate: String,
+        extractionProvenance: String = DocumentMetadataExtractionProvenance.pdfText.rawValue,
+        warnings: [DocumentMetadataWarning] = []
+    ) {
         self.sourceFile = sourceFile
         self.documentType = documentType
         self.documentSubject = documentSubject
         self.documentDate = documentDate
+        self.extractionProvenance = extractionProvenance
+        self.warnings = warnings
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sourceFile = try container.decode(String.self, forKey: .sourceFile)
+        documentType = try container.decode(String.self, forKey: .documentType)
+        documentSubject = try container.decode(String.self, forKey: .documentSubject)
+        documentDate = try container.decode(String.self, forKey: .documentDate)
+        extractionProvenance = try container.decodeIfPresent(String.self, forKey: .extractionProvenance)
+            ?? DocumentMetadataExtractionProvenance.pdfText.rawValue
+        warnings = try container.decodeIfPresent([DocumentMetadataWarning].self, forKey: .warnings) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sourceFile, forKey: .sourceFile)
+        try container.encode(documentType, forKey: .documentType)
+        try container.encode(documentSubject, forKey: .documentSubject)
+        try container.encode(documentDate, forKey: .documentDate)
+        try container.encode(extractionProvenance, forKey: .extractionProvenance)
+        try container.encode(warnings, forKey: .warnings)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -18,37 +73,79 @@ public struct DocumentMetadataEntry: Codable, Equatable, Sendable {
         case documentType = "document_type"
         case documentSubject = "document_subject"
         case documentDate = "document_date"
+        case extractionProvenance = "extraction_provenance"
+        case warnings
     }
 }
 
 public struct DocumentMetadataPayload: Codable, Equatable, Sendable {
     public let generatedAt: String
     public let documents: [DocumentMetadataEntry]
+    public let warnings: [DocumentMetadataWarning]
 
-    public init(generatedAt: String, documents: [DocumentMetadataEntry]) {
+    public init(
+        generatedAt: String,
+        documents: [DocumentMetadataEntry],
+        warnings: [DocumentMetadataWarning] = []
+    ) {
         self.generatedAt = generatedAt
         self.documents = documents
+        self.warnings = warnings
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try container.decode(String.self, forKey: .generatedAt)
+        documents = try container.decode([DocumentMetadataEntry].self, forKey: .documents)
+        warnings = try container.decodeIfPresent([DocumentMetadataWarning].self, forKey: .warnings) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(generatedAt, forKey: .generatedAt)
+        try container.encode(documents, forKey: .documents)
+        try container.encode(warnings, forKey: .warnings)
     }
 
     enum CodingKeys: String, CodingKey {
         case generatedAt = "generated_at"
         case documents
+        case warnings
+    }
+}
+
+public struct DocumentMetadataExtractionOutcome: Equatable, Sendable {
+    public let entry: DocumentMetadataEntry
+
+    public init(entry: DocumentMetadataEntry) {
+        self.entry = entry
     }
 }
 
 public enum MuniAnalyseDocumentMetadataExtractor {
     public static func extractEntry(from text: String, sourceFile: String) -> DocumentMetadataEntry? {
+        extractEntryWithDiagnostics(from: text, sourceFile: sourceFile)?.entry
+    }
+
+    public static func extractEntryWithDiagnostics(
+        from text: String,
+        sourceFile: String
+    ) -> DocumentMetadataExtractionOutcome? {
         let normalizedSourceFile = normalizedSourceFileName(from: sourceFile)
 
         if let resolutionEntry = extractResolutionEntry(from: text, sourceFile: normalizedSourceFile) {
-            return resolutionEntry
+            return DocumentMetadataExtractionOutcome(entry: resolutionEntry)
         }
 
         if let agendaEntry = extractAgendaEntry(from: text, sourceFile: normalizedSourceFile) {
-            return agendaEntry
+            return DocumentMetadataExtractionOutcome(entry: agendaEntry)
         }
 
-        return extractEntryFromSourceFileName(sourceFile: normalizedSourceFile)
+        if let fallback = extractEntryFromSourceFileName(sourceFile: normalizedSourceFile) {
+            return DocumentMetadataExtractionOutcome(entry: fallback)
+        }
+
+        return nil
     }
 
     private static func extractResolutionEntry(from text: String, sourceFile: String) -> DocumentMetadataEntry? {
@@ -67,7 +164,8 @@ public enum MuniAnalyseDocumentMetadataExtractor {
             sourceFile: sourceFile,
             documentType: "Résolution NO \(number)",
             documentSubject: subject,
-            documentDate: date
+            documentDate: date,
+            extractionProvenance: DocumentMetadataExtractionProvenance.pdfText.rawValue
         )
     }
 
@@ -87,7 +185,8 @@ public enum MuniAnalyseDocumentMetadataExtractor {
             sourceFile: sourceFile,
             documentType: "Ordre du jour",
             documentSubject: subject,
-            documentDate: date
+            documentDate: date,
+            extractionProvenance: DocumentMetadataExtractionProvenance.pdfText.rawValue
         )
     }
 
@@ -301,7 +400,9 @@ public enum MuniAnalyseDocumentMetadataExtractor {
                 sourceFile: sourceFile,
                 documentType: "Résolution NO \(number)",
                 documentSubject: normalizeResolutionSubjectForNaming(subject ?? "Sans objet"),
-                documentDate: date
+                documentDate: date,
+                extractionProvenance: DocumentMetadataExtractionProvenance.filenameFallback.rawValue,
+                warnings: [filenameFallbackWarning(sourceFile: sourceFile)]
             )
         }
 
@@ -310,7 +411,9 @@ public enum MuniAnalyseDocumentMetadataExtractor {
                 sourceFile: sourceFile,
                 documentType: "Ordre du jour",
                 documentSubject: subject ?? "Séance du conseil",
-                documentDate: date
+                documentDate: date,
+                extractionProvenance: DocumentMetadataExtractionProvenance.filenameFallback.rawValue,
+                warnings: [filenameFallbackWarning(sourceFile: sourceFile)]
             )
         }
 
@@ -328,6 +431,14 @@ public enum MuniAnalyseDocumentMetadataExtractor {
         }
 
         return []
+    }
+
+    private static func filenameFallbackWarning(sourceFile: String) -> DocumentMetadataWarning {
+        DocumentMetadataWarning(
+            code: "METADATA_FROM_FILENAME_FALLBACK",
+            message: "Metadata extracted from filename fallback because text extraction was not sufficient.",
+            sourceFile: sourceFile
+        )
     }
 
     private static func normalizeResolutionSubjectForNaming(_ subject: String) -> String {

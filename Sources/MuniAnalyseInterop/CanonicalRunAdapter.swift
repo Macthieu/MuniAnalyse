@@ -173,18 +173,35 @@ public enum CanonicalRunAdapter {
         startedAt: String
     ) throws -> ToolResult {
         var extractedDocuments: [DocumentMetadataEntry] = []
-        var warningMessages: [String] = []
+        var warnings: [DocumentMetadataWarning] = []
 
         for sourcePath in context.sourcePaths {
+            let sourceFile = URL(fileURLWithPath: sourcePath).lastPathComponent
             do {
                 let text = try readSourceTextForExtraction(fromPath: sourcePath)
-                if let document = MuniAnalyseDocumentMetadataExtractor.extractEntry(from: text, sourceFile: sourcePath) {
-                    extractedDocuments.append(document)
+                if let outcome = MuniAnalyseDocumentMetadataExtractor.extractEntryWithDiagnostics(
+                    from: text,
+                    sourceFile: sourcePath
+                ) {
+                    extractedDocuments.append(outcome.entry)
+                    warnings.append(contentsOf: outcome.entry.warnings)
                 } else {
-                    warningMessages.append("No supported metadata extracted for \(URL(fileURLWithPath: sourcePath).lastPathComponent).")
+                    warnings.append(
+                        DocumentMetadataWarning(
+                            code: "METADATA_NOT_EXTRACTED",
+                            message: "No supported metadata extracted from source.",
+                            sourceFile: sourceFile
+                        )
+                    )
                 }
             } catch {
-                warningMessages.append("Unable to read \(sourcePath): \(error.localizedDescription)")
+                warnings.append(
+                    DocumentMetadataWarning(
+                        code: "SOURCE_READ_FAILED",
+                        message: "Unable to read source for metadata extraction: \(error.localizedDescription)",
+                        sourceFile: sourceFile
+                    )
+                )
             }
         }
 
@@ -194,10 +211,14 @@ public enum CanonicalRunAdapter {
             )
         }
 
-        let payload = DocumentMetadataPayload(generatedAt: isoTimestamp(), documents: extractedDocuments)
+        let payload = DocumentMetadataPayload(
+            generatedAt: isoTimestamp(),
+            documents: extractedDocuments,
+            warnings: warnings
+        )
         try writeJSONFile(payload, toPath: context.outputPath, failurePrefix: "document metadata")
 
-        let finalStatus: ToolStatus = warningMessages.isEmpty ? .succeeded : .needsReview
+        let finalStatus: ToolStatus = warnings.isEmpty ? .succeeded : .needsReview
         let finishedAt = isoTimestamp()
 
         let outputArtifacts: [ArtifactDescriptor] = [
@@ -207,13 +228,14 @@ public enum CanonicalRunAdapter {
                 uri: fileURI(forPath: context.outputPath),
                 mediaType: "application/json",
                 metadata: [
-                    "documents_extracted": .number(Double(extractedDocuments.count))
+                    "documents_extracted": .number(Double(extractedDocuments.count)),
+                    "warning_count": .number(Double(warnings.count))
                 ]
             )
         ]
 
         let summary: String
-        if warningMessages.isEmpty {
+        if warnings.isEmpty {
             summary = "Document metadata extraction completed successfully."
         } else {
             summary = "Document metadata extraction completed with review warnings."
@@ -234,7 +256,7 @@ public enum CanonicalRunAdapter {
                 sourcePaths: context.sourcePaths,
                 outputPath: context.outputPath,
                 documents: extractedDocuments,
-                warnings: warningMessages
+                warnings: warnings
             )
         )
     }
@@ -551,18 +573,30 @@ public enum CanonicalRunAdapter {
         sourcePaths: [String],
         outputPath: String,
         documents: [DocumentMetadataEntry],
-        warnings: [String]
+        warnings: [DocumentMetadataWarning]
     ) -> [String: JSONValue] {
         var metadata: [String: JSONValue] = [
             "mode": .string("extract_document_metadata"),
             "source_count": .number(Double(sourcePaths.count)),
             "documents_extracted": .number(Double(documents.count)),
+            "warning_count": .number(Double(warnings.count)),
             "document_metadata_output_path": .string(outputPath),
             "source_paths": .array(sourcePaths.map { .string($0) })
         ]
 
         if !warnings.isEmpty {
-            metadata["warnings"] = .array(warnings.map { .string($0) })
+            metadata["warnings"] = .array(
+                warnings.map { warning in
+                    var object: [String: JSONValue] = [
+                        "code": .string(warning.code),
+                        "message": .string(warning.message)
+                    ]
+                    if let sourceFile = warning.sourceFile {
+                        object["source_file"] = .string(sourceFile)
+                    }
+                    return .object(object)
+                }
+            )
         }
 
         return metadata
