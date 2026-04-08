@@ -148,11 +148,16 @@ Séance du conseil
         #expect(resolutionEntry?.documentType == "Résolution NO 2025-54")
         #expect(resolutionEntry?.documentSubject == "Extension du délai de construction pour Plantation d’arbres M.M. inc.")
         #expect(resolutionEntry?.documentDate == "2025-02-03")
+        #expect(resolutionEntry?.extractionProvenance == "pdf_text")
+        #expect(resolutionEntry?.warnings.isEmpty == true)
 
         let agendaEntry = payload.documents.first { $0.sourceFile == "source-ordre.pdf" }
         #expect(agendaEntry?.documentType == "Ordre du jour")
         #expect(agendaEntry?.documentSubject == "Séance du conseil")
         #expect(agendaEntry?.documentDate == "2025-03-17")
+        #expect(agendaEntry?.extractionProvenance == "pdf_text")
+        #expect(agendaEntry?.warnings.isEmpty == true)
+        #expect(payload.warnings.isEmpty == true)
     }
 
     @Test
@@ -242,7 +247,7 @@ Adoptée le 3 février 2025
 
         let result = CanonicalRunAdapter.execute(request: request)
 
-        #expect(result.status == .succeeded)
+        #expect(result.status == .needsReview)
         #expect(result.errors.isEmpty)
         #expect(result.metadata["documents_extracted"] == .number(2))
 
@@ -252,16 +257,22 @@ Adoptée le 3 février 2025
         let resolutionEntry = payload.documents.first { $0.sourceFile.contains("Résolution NO 2025-54") }
         #expect(resolutionEntry?.documentType == "Résolution NO 2025-54")
         #expect(resolutionEntry?.documentDate == "2025-02-03")
+        #expect(resolutionEntry?.extractionProvenance == "filename_fallback")
+        #expect(resolutionEntry?.warnings.contains(where: { $0.code == "METADATA_FROM_FILENAME_FALLBACK" }) == true)
 
         let agendaEntry = payload.documents.first { $0.sourceFile.contains("Ordre du jour") }
         #expect(agendaEntry?.documentType == "Ordre du jour")
         #expect(agendaEntry?.documentSubject == "Séance du conseil")
         #expect(agendaEntry?.documentDate == "2025-03-17")
+        #expect(agendaEntry?.extractionProvenance == "filename_fallback")
+        #expect(agendaEntry?.warnings.contains(where: { $0.code == "METADATA_FROM_FILENAME_FALLBACK" }) == true)
+        #expect(payload.warnings.filter { $0.code == "METADATA_FROM_FILENAME_FALLBACK" }.count == 2)
     }
 }
 
 private struct DocumentMetadataTestPayload: Decodable {
     let documents: [DocumentMetadataTestEntry]
+    let warnings: [DocumentMetadataTestWarning]
 }
 
 private struct DocumentMetadataTestEntry: Decodable {
@@ -269,11 +280,27 @@ private struct DocumentMetadataTestEntry: Decodable {
     let documentType: String
     let documentSubject: String
     let documentDate: String
+    let extractionProvenance: String
+    let warnings: [DocumentMetadataTestWarning]
 
     enum CodingKeys: String, CodingKey {
         case sourceFile = "source_file"
         case documentType = "document_type"
         case documentSubject = "document_subject"
         case documentDate = "document_date"
+        case extractionProvenance = "extraction_provenance"
+        case warnings
+    }
+}
+
+private struct DocumentMetadataTestWarning: Decodable {
+    let code: String
+    let message: String
+    let sourceFile: String?
+
+    enum CodingKeys: String, CodingKey {
+        case code
+        case message
+        case sourceFile = "source_file"
     }
 }
